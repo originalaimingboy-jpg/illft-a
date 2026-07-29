@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Illft</string>
+    <string name="title_activity_main">Illft</string>
+    <string name="package_name">com.illlet.a</string>
+    <string name="custom_url_scheme">com.illlet.a</string>
+</resources>

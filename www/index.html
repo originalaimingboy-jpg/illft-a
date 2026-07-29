@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<!--
+  illft A - Single-file browser-based GLB editor & optimizer.
+  Open this file directly in a modern browser. No build tools required.
+  Uses Three.js (r160) via ESM CDN with GLTFLoader, GLTFExporter, OrbitControls,
+  RoomEnvironment for HDR-like lighting, and SimplifyModifier for poly reduction.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>illft A — GLB Editor & Optimizer</title>
+<style>
+  /* =========================================================
+     Base / Reset
+     ========================================================= */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; width: 100%; overflow: hidden;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #e6e8ee; background: #0b0d12; user-select: none; -webkit-user-select: none;
+  }
+  button, input, select { font-family: inherit; color: inherit; }
+
+  /* =========================================================
+     Layout
+     ========================================================= */
+  #app { display: grid; grid-template-rows: 52px 1fr;
+    grid-template-columns: 260px 1fr 300px;
+    grid-template-areas: "top top top" "left center right";
+    width: 100vw; height: 100vh; gap: 8px; padding: 8px;
+    background: radial-gradient(1200px 800px at 20% -10%, #17203a 0%, #0b0d12 60%);
+  }
+  .top { grid-area: top; }
+  .left { grid-area: left; }
+  .center { grid-area: center; position: relative; overflow: hidden; }
+  .right { grid-area: right; }
+
+  /* Glassmorphism cards */
+  .card {
+    background: rgba(20, 24, 34, 0.6);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+
+  /* =========================================================
+     Top toolbar
+     ========================================================= */
+  .top { display: flex; align-items: center; padding: 0 14px; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.3px; }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%;
+    background: linear-gradient(135deg, #7c9cff, #b57cff); box-shadow: 0 0 12px #7c9cffaa; }
+  .brand-name { font-size: 15px; }
+  .brand-sub { font-size: 11px; color: #8b93a7; margin-left: 6px; }
+  .top-spacer { flex: 1; }
+  .top .btn { margin-left: 6px; }
+  .top .fps { font-size: 12px; color: #9aa3b8; margin-left: 8px; padding: 4px 8px;
+    background: rgba(255,255,255,0.04); border-radius: 8px; font-variant-numeric: tabular-nums; }
+
+  /* =========================================================
+     Sidebars & sections
+     ========================================================= */
+  .side { padding: 12px; overflow-y: auto; overflow-x: hidden; }
+  .side::-webkit-scrollbar { width: 8px; }
+  .side::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+
+  .section { margin-bottom: 14px; }
+  .section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.4px;
+    color: #8b93a7; margin-bottom: 8px; padding: 0 2px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+  .row label { color: #b7bdcc; }
+  .row .val { color: #e6e8ee; font-variant-numeric: tabular-nums; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+
+  /* =========================================================
+     Controls
+     ========================================================= */
+  .btn {
+    appearance: none; border: 1px solid rgba(255,255,255,0.08);
+    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    color: #e6e8ee; padding: 8px 12px; border-radius: 10px; font-size: 12px;
+    cursor: pointer; transition: transform .08s ease, background .2s ease, border-color .2s ease;
+    white-space: nowrap;
+  }
+  .btn:hover { background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.04));
+    border-color: rgba(255,255,255,0.15); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: linear-gradient(180deg, #6d8bff, #4b6cff);
+    border-color: #6d8bff88; box-shadow: 0 6px 18px rgba(75,108,255,0.35); }
+  .btn.primary:hover { background: linear-gradient(180deg, #7d97ff, #5a79ff); }
+  .btn.ghost { background: transparent; }
+  .btn.small { padding: 6px 8px; font-size: 11px; }
+  .btn.active { background: linear-gradient(180deg, #2a3552, #1c2540);
+    border-color: #6d8bffaa; color: #cfd8ff; }
+
+  input[type="range"] {
+    -webkit-appearance: none; width: 100%; height: 4px;
+    background: rgba(255,255,255,0.08); border-radius: 4px; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #6d8bff; cursor: pointer; border: 2px solid #0b0d12;
+    box-shadow: 0 0 8px rgba(109,139,255,0.6);
+  }
+  input[type="color"] {
+    width: 34px; height: 26px; border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px; background: transparent; cursor: pointer; padding: 0;
+  }
+  input[type="checkbox"] { accent-color: #6d8bff; cursor: pointer; }
+  select {
+    width: 100%; padding: 6px 8px; font-size: 12px; border-radius: 8px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color: #e6e8ee;
+  }
+
+  /* =========================================================
+     Viewer overlays
+     ========================================================= */
+  #viewer { width: 100%; height: 100%; display: block; border-radius: 14px; }
+  .overlay { position: absolute; pointer-events: none; }
+  .stats { top: 12px; left: 12px; font-size: 11px; color: #b7bdcc;
+    background: rgba(11,13,18,0.55); padding: 8px 10px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(8px);
+    line-height: 1.45; font-variant-numeric: tabular-nums; }
+  .stats span { color: #8b93a7; }
+  .empty-state {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 20px;
+    pointer-events: none;
+  }
+  .empty-state .icon { font-size: 48px; margin-bottom: 8px; opacity: 0.7; }
+  .empty-state h2 { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+  .empty-state p { color: #8b93a7; font-size: 13px; max-width: 340px; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: rgba(20,24,34,0.95); border: 1px solid rgba(255,255,255,0.08);
+    color: #e6e8ee; padding: 10px 16px; border-radius: 10px; font-size: 13px;
+    opacity: 0; transition: opacity .3s, transform .3s; z-index: 999;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.error { border-color: #ff6b6baa; color: #ffbaba; }
+  .toast.success { border-color: #6dffa8aa; color: #baffd4; }
+
+  /* Loading spinner */
+  .loading {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(11,13,18,0.6); border-radius: 14px; z-index: 5;
+  }
+  .loading.show { display: flex; }
+  .spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,0.1);
+    border-top-color: #6d8bff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Upload dropzone (left) */
+  .dropzone {
+    border: 2px dashed rgba(255,255,255,0.15); border-radius: 12px;
+    padding: 20px 12px; text-align: center; cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: #6d8bff; background: rgba(109,139,255,0.05); }
+  .dropzone .icon { font-size: 28px; margin-bottom: 6px; }
+  .dropzone .hint { font-size: 11px; color: #8b93a7; margin-top: 4px; }
+
+  /* Poly slider container */
+  .poly-block {
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; padding: 10px; margin-bottom: 8px;
+  }
+  .poly-block .poly-readout { font-size: 11px; color: #8b93a7; margin-top: 4px; }
+
+  /* Collapsible sections */
+  .section.collapsed > *:not(h3) { display: none; }
+  .section h3 { cursor: pointer; display: flex; align-items: center; }
+  .section h3::after {
+    content: '▾'; margin-left: auto; transition: transform .2s; font-size: 12px; color: #6d8bff;
+  }
+  .section.collapsed h3::after { transform: rotate(-90deg); }
+
+  /* Small inline help text */
+  .hint-text { font-size: 10px; color: #6b7388; margin: 4px 2px 8px; line-height: 1.4; }
+
+  /* Responsive */
+  @media (max-width: 1100px) {
+    #app { grid-template-columns: 220px 1fr 260px; }
+  }
+  @media (max-width: 860px) {
+    #app { grid-template-rows: 52px 1fr auto auto;
+      grid-template-columns: 1fr;
+      grid-template-areas: "top" "center" "left" "right"; }
+    .side { max-height: 220px; }
+  }
+</style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ TOP TOOLBAR ============ -->
+  <div class="top card">
+    <div class="brand">
+      <span class="dot"></span>
+      <span class="brand-name">illft A</span>
+      <span class="brand-sub">v1.2 · GLB Editor & Optimizer</span>
+    </div>
+    <div class="top-spacer"></div>
+    <span class="fps" id="fpsLabel">FPS: —</span>
+    <button class="btn" id="btnImport">Import</button>
+    <button class="btn primary" id="btnExport">Export GLB</button>
+    <button class="btn ghost" id="btnResetAll">Reset</button>
+  </div>
+
+  <!-- ============ LEFT SIDEBAR: Upload + Model info ============ -->
+  <div class="left side card">
+    <div class="section">
+      <h3>Project</h3>
+      <div class="dropzone" id="dropzone">
+        <div class="icon">⬆</div>
+        <div><strong>Upload GLB</strong></div>
+        <div class="hint">Click or drop a .glb file</div>
+      </div>
+      <input type="file" id="fileInput" accept=".glb" style="display:none" />
+    </div>
+
+    <div class="section">
+      <h3>Model Info</h3>
+      <div class="row"><label>Vertices</label><span class="val" id="infoVerts">—</span></div>
+      <div class="row"><label>Triangles</label><span class="val" id="infoTris">—</span></div>
+      <div class="row"><label>Meshes</label><span class="val" id="infoMeshes">—</span></div>
+      <div class="row"><label>Materials</label><span class="val" id="infoMats">—</span></div>
+      <div class="row"><label>Textures</label><span class="val" id="infoTexCount">—</span></div>
+      <div class="row"><label>Tex. Res</label><span class="val" id="infoTexRes">—</span></div>
+      <div class="row"><label>File Size</label><span class="val" id="infoSize">—</span></div>
+      <div class="row"><label>Bounds</label><span class="val" id="infoBounds">—</span></div>
+    </div>
+
+    <div class="section">
+      <h3>Performance</h3>
+      <div class="row"><label>Frame Time</label><span class="val" id="perfFrame">—</span></div>
+      <div class="row"><label>GPU Est.</label><span class="val" id="perfGpu">—</span></div>
+      <div class="row"><label>Draw Calls</label><span class="val" id="perfCalls">—</span></div>
+    </div>
+
+    <div class="section">
+      <h3>View Mode</h3>
+      <div class="grid2">
+        <button class="btn small view-mode active" data-mode="solid">Solid</button>
+        <button class="btn small view-mode" data-mode="wireframe">Wireframe</button>
+        <button class="btn small view-mode" data-mode="normals">Normals</button>
+        <button class="btn small view-mode" data-mode="uv">UV Preview</button>
+        <button class="btn small view-mode" data-mode="material">Material</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Camera</h3>
+      <div class="grid2">
+        <button class="btn small" id="btnFrameCam">Auto Frame</button>
+        <button class="btn small" id="btnResetCam">Reset Camera</button>
+      </div>
+      <div class="row" style="margin-top:8px"><label>Show Grid</label><input type="checkbox" id="cGrid" /></div>
+    </div>
+  </div>
+
+  <!-- ============ CENTER: 3D Viewer ============ -->
+  <div class="center card">
+    <canvas id="viewer"></canvas>
+    <div class="overlay stats" id="statsOverlay">
+      <div><span>Render:</span> <span id="statsRender">0.0 ms</span></div>
+      <div><span>FPS:</span> <span id="statsFps">0</span></div>
+    </div>
+    <div class="empty-state" id="emptyState">
+      <div class="icon">🎲</div>
+      <h2>illft A — No model loaded</h2>
+      <p>Upload a <strong>.glb</strong> file to start editing. Textures, materials and UVs will be preserved.</p>
+    </div>
+    <div class="loading" id="loading"><div class="spinner"></div></div>
+  </div>
+
+  <!-- ============ RIGHT SIDEBAR: Editing controls ============ -->
+  <div class="right side card">
+
+    <div class="section">
+      <h3>Style Presets</h3>
+      <div class="grid2">
+        <button class="btn small preset" data-preset="original">Original</button>
+        <button class="btn small preset" data-preset="lowpoly">Low Poly</button>
+        <button class="btn small preset" data-preset="psx">PSX</button>
+        <button class="btn small preset" data-preset="ps2">PS2</button>
+        <button class="btn small preset" data-preset="stylized">Stylized</button>
+        <button class="btn small preset" data-preset="flat">Flat</button>
+        <button class="btn small preset" data-preset="toon">Toon</button>
+        <button class="btn small preset" data-preset="voxel">Voxel</button>
+        <button class="btn small preset" data-preset="clay">Clay</button>
+        <button class="btn small preset" data-preset="retro">Retro</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Poly Count</h3>
+      <div class="poly-block">
+        <div class="row"><label>Reduction</label><span class="val" id="vPoly">100%</span></div>
+        <input type="range" id="sPoly" min="0.05" max="1" step="0.01" value="1" />
+        <div class="poly-readout">
+          <span>Current: </span><span id="polyCurrentTris">—</span>
+          <span> / Target: </span><span id="polyTargetTris">—</span>
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:6px">
+        <button class="btn small" id="btnPolyApply">Apply</button>
+        <button class="btn small" id="btnPolyFull">Restore 100%</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Texture Adjust</h3>
+      <div class="row"><label>Brightness</label><span class="val" id="vBright">1.00</span></div>
+      <input type="range" id="sBright" min="0" max="2" step="0.01" value="1" />
+      <div class="row"><label>Contrast</label><span class="val" id="vContrast">1.00</span></div>
+      <input type="range" id="sContrast" min="0" max="2" step="0.01" value="1" />
+      <div class="row"><label>Saturation</label><span class="val" id="vSat">1.00</span></div>
+      <input type="range" id="sSat" min="0" max="2" step="0.01" value="1" />
+      <div class="row"><label>Hue</label><span class="val" id="vHue">0°</span></div>
+      <input type="range" id="sHue" min="-180" max="180" step="1" value="0" />
+      <div class="row"><label>Gamma</label><span class="val" id="vGamma">1.00</span></div>
+      <input type="range" id="sGamma" min="0.3" max="2.5" step="0.01" value="1" />
+      <div class="row"><label>Exposure</label><span class="val" id="vExp">1.00</span></div>
+      <input type="range" id="sExp" min="0" max="3" step="0.01" value="1" />
+      <div class="row"><label>Sharpness</label><span class="val" id="vSharp">0.00</span></div>
+      <input type="range" id="sSharp" min="0" max="1" step="0.01" value="0" />
+      <div class="row" style="margin-top:8px"><label>Texture Res</label>
+        <select id="texRes">
+          <option value="0">Original</option>
+          <option value="4096">4096</option>
+          <option value="2048">2048</option>
+          <option value="1024">1024</option>
+          <option value="512">512</option>
+          <option value="256">256</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Material</h3>
+      <div class="row"><label>Metalness</label><span class="val" id="vMetal">—</span></div>
+      <input type="range" id="sMetal" min="0" max="1" step="0.01" value="0" />
+      <div class="row"><label>Roughness</label><span class="val" id="vRough">—</span></div>
+      <input type="range" id="sRough" min="0" max="1" step="0.01" value="1" />
+      <div class="row"><label>Emissive</label><span class="val" id="vEmi">0.00</span></div>
+      <input type="range" id="sEmi" min="0" max="5" step="0.01" value="0" />
+      <div class="row"><label>Opacity</label><span class="val" id="vOpa">1.00</span></div>
+      <input type="range" id="sOpa" min="0" max="1" step="0.01" value="1" />
+      <div class="row"><label>Color Tint</label><input type="color" id="matColor" value="#ffffff" /></div>
+      <div class="row"><label>Double Sided</label><input type="checkbox" id="cDouble" /></div>
+      <div class="row"><label>Wireframe</label><input type="checkbox" id="cWire" /></div>
+      <div class="row"><label>Flat Shading</label><input type="checkbox" id="cFlat" /></div>
+      <div class="row"><label>Outline</label><input type="checkbox" id="cOutline" /></div>
+    </div>
+
+    <div class="section">
+      <h3>Transform</h3>
+      <div class="row"><label>Scale</label><span class="val" id="vScale">1.00</span></div>
+      <input type="range" id="sScale" min="0.1" max="5" step="0.01" value="1" />
+      <div class="row"><label>Rot X</label><span class="val" id="vRx">0°</span></div>
+      <input type="range" id="sRx" min="-180" max="180" step="1" value="0" />
+      <div class="row"><label>Rot Y</label><span class="val" id="vRy">0°</span></div>
+      <input type="range" id="sRy" min="-180" max="180" step="1" value="0" />
+      <div class="row"><label>Rot Z</label><span class="val" id="vRz">0°</span></div>
+      <input type="range" id="sRz" min="-180" max="180" step="1" value="0" />
+      <div class="grid2" style="margin-top:8px">
+        <button class="btn small" id="btnCenter">Center Pivot</button>
+        <button class="btn small" id="btnGround">Ground</button>
+        <button class="btn small" id="btnResetTransform">Reset Xform</button>
+        <button class="btn small" id="btnFrame2">Auto Frame</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Repair</h3>
+      <div class="grid2">
+        <button class="btn small" id="btnRecalcNormals">Recalc Normals</button>
+        <button class="btn small" id="btnFlipNormals">Flip Normals</button>
+        <button class="btn small" id="btnMergeMats">Merge Mats</button>
+        <button class="btn small" id="btnRemoveEmpty">Rm Empty</button>
+        <button class="btn small" id="btnRemoveUnused">Rm Unused</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Lighting</h3>
+      <div class="row"><label>Ambient</label><span class="val" id="vAmb">0.40</span></div>
+      <input type="range" id="sAmb" min="0" max="3" step="0.01" value="0.4" />
+      <div class="row"><label>Directional</label><span class="val" id="vDir">1.00</span></div>
+      <input type="range" id="sDir" min="0" max="5" step="0.01" value="1" />
+      <div class="row"><label>Env Intensity</label><span class="val" id="vEnv">1.00</span></div>
+      <input type="range" id="sEnv" min="0" max="3" step="0.01" value="1" />
+      <div class="row"><label>Shadows</label><input type="checkbox" id="cShadow" checked /></div>
+      <div class="row"><label>Background</label><input type="color" id="bgColor" value="#141824" /></div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Three.js via ES modules from a pinned CDN. All addons match the same version. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+/* =============================================================
+ * IMPORTS
+ * ============================================================= */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+
+/* =============================================================
+ * DOM helpers
+ * ============================================================= */
+const $ = (id) => document.getElementById(id);
+const canvas = $('viewer');
+
+function toast(msg, type = 'info') {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (type || '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = 'toast'; }, 2600);
+}
+function showLoading(v) { $('loading').classList.toggle('show', v); }
+
+/* =============================================================
+ * Renderer / Scene / Camera / Controls
+ * ============================================================= */
+const renderer = new THREE.WebGLRenderer({
+  canvas, antialias: true, alpha: false, preserveDrawingBuffer: false
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.physicallyCorrectLights = true;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#141824');
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
+camera.position.set(3, 2, 4);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enablePan = true;
+
+/* HDR-like environment via RoomEnvironment (no external HDRI needed). */
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environment = envTexture;
+scene.environmentIntensity = 1.0;
+
+/* Lights */
+const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+scene.add(ambient);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+dirLight.position.set(5, 8, 5);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(1024, 1024);
+dirLight.shadow.camera.near = 0.1;
+dirLight.shadow.camera.far = 50;
+dirLight.shadow.camera.left = -10;
+dirLight.shadow.camera.right = 10;
+dirLight.shadow.camera.top = 10;
+dirLight.shadow.camera.bottom = -10;
+dirLight.shadow.bias = -0.0005;
+scene.add(dirLight);
+
+/* Ground shadow-catcher (invisible plane that only receives shadows) */
+const groundGeo = new THREE.PlaneGeometry(200, 200);
+const groundMat = new THREE.ShadowMaterial({ opacity: 0.25 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* Optional grid helper */
+const gridHelper = new THREE.GridHelper(20, 40, 0x4b6cff, 0x1c2540);
+gridHelper.visible = false;
+scene.add(gridHelper);
+
+/* =============================================================
+ * State
+ * ============================================================= */
+const state = {
+  originalArrayBuffer: null,   // last uploaded .glb bytes (source of truth for reset)
+  root: null,                  // current THREE.Object3D root of the model
+  gltf: null,                  // full parsed gltf object
+  meshes: [],                  // list of meshes in current model
+  materials: [],               // unique materials
+  textures: [],                // unique textures
+  originalGeometries: new Map(),      // mesh.uuid -> original BufferGeometry clone
+  originalMaterials: new Map(),       // material.uuid -> snapshot
+  originalTextureImages: new Map(),   // texture.uuid -> original HTMLImageElement/ImageBitmap
+  processedTextureCache: new Map(),   // key -> processed canvas texture
+  animations: [],
+  mixer: null,
+  fileSize: 0,
+  fileName: 'model.glb',
+  viewMode: 'solid',
+  outlineMeshes: [],
+  currentPolyRatio: 1.0,       // current poly reduction ratio applied
+};
+
+/* =============================================================
+ * Resize handling
+ * ============================================================= */
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width));
+  const h = Math.max(1, Math.floor(rect.height));
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvas.parentElement);
+resize();
+
+/* =============================================================
+ * Collapsible sections (click on h3 to collapse)
+ * ============================================================= */
+document.querySelectorAll('.section h3').forEach(h => {
+  h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
+});
+
+/* =============================================================
+ * Render loop with FPS + render time metrics
+ * ============================================================= */
+const clock = new THREE.Clock();
+let frames = 0, fpsAccum = 0, lastFps = 0;
+let renderTimeMs = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  if (state.mixer) state.mixer.update(dt);
+  controls.update();
+
+  const t0 = performance.now();
+  renderer.render(scene, camera);
+  const t1 = performance.now();
+  renderTimeMs = renderTimeMs * 0.9 + (t1 - t0) * 0.1;
+
+  frames++; fpsAccum += dt;
+  if (fpsAccum >= 0.5) {
+    lastFps = Math.round(frames / fpsAccum);
+    frames = 0; fpsAccum = 0;
+    $('fpsLabel').textContent = 'FPS: ' + lastFps;
+    $('statsFps').textContent = lastFps;
+    $('statsRender').textContent = renderTimeMs.toFixed(2) + ' ms';
+    $('perfFrame').textContent = renderTimeMs.toFixed(2) + ' ms';
+    $('perfCalls').textContent = renderer.info.render.calls;
+    $('perfGpu').textContent = estimateGpuMemory();
+  }
+}
+animate();
+
+/* Estimate GPU memory: textures + geometry buffers */
+function estimateGpuMemory() {
+  let bytes = 0;
+  state.textures.forEach(t => {
+    const img = t.image;
+    if (img && img.width) bytes += img.width * img.height * 4;
+  });
+  state.meshes.forEach(m => {
+    const g = m.geometry;
+    if (!g) return;
+    for (const k in g.attributes) {
+      const a = g.attributes[k];
+      bytes += a.array.byteLength;
+    }
+    if (g.index) bytes += g.index.array.byteLength;
+  });
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+/* =============================================================
+ * File Upload
+ * ============================================================= */
+$('btnImport').onclick = () => $('fileInput').click();
+$('dropzone').onclick = () => $('fileInput').click();
+$('fileInput').onchange = (e) => {
+  const f = e.target.files[0];
+  if (f) loadFile(f);
+};
+const dz = $('dropzone');
+['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); dz.classList.add('drag');
+}));
+['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); dz.classList.remove('drag');
+}));
+dz.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+// Also allow drop anywhere on center viewer
+$('viewer').addEventListener('dragover', e => e.preventDefault());
+$('viewer').addEventListener('drop', e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+
+function loadFile(file) {
+  if (!file.name.toLowerCase().endsWith('.glb')) {
+    toast('Only .glb files are supported', 'error');
+    return;
+  }
+  state.fileSize = file.size;
+  state.fileName = file.name;
+  const reader = new FileReader();
+  reader.onerror = () => toast('Failed to read file', 'error');
+  reader.onload = () => {
+    state.originalArrayBuffer = reader.result;
+    parseAndLoadGLB(reader.result);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/* =============================================================
+ * GLB loading
+ * ============================================================= */
+const loader = new GLTFLoader();
+
+function parseAndLoadGLB(arrayBuffer) {
+  showLoading(true);
+  try {
+    loader.parse(arrayBuffer, '', (gltf) => {
+      onModelLoaded(gltf);
+      showLoading(false);
+      toast('Model loaded successfully', 'success');
+    }, (err) => {
+      console.error(err);
+      showLoading(false);
+      toast('Failed to load GLB (corrupted or invalid)', 'error');
+    });
+  } catch (err) {
+    console.error(err);
+    showLoading(false);
+    toast('Corrupted GLB file', 'error');
+  }
+}
+
+function disposeCurrent() {
+  if (state.root) {
+    scene.remove(state.root);
+    state.root.traverse(obj => {
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        mats.forEach(m => { if (m && m.dispose) m.dispose(); });
+      }
+    });
+  }
+  state.root = null;
+  state.gltf = null;
+  state.meshes = [];
+  state.materials = [];
+  state.textures = [];
+  state.originalGeometries.clear();
+  state.originalMaterials.clear();
+  state.originalTextureImages.clear();
+  state.processedTextureCache.clear();
+  state.animations = [];
+  state.mixer = null;
+  state.outlineMeshes.forEach(o => scene.remove(o));
+  state.outlineMeshes = [];
+  state.currentPolyRatio = 1.0;
+}
+
+function onModelLoaded(gltf) {
+  disposeCurrent();
+  state.gltf = gltf;
+  state.root = gltf.scene || gltf.scenes[0];
+  state.animations = gltf.animations || [];
+
+  // Collect meshes / materials / textures & snapshot originals.
+  state.root.traverse(obj => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+      state.meshes.push(obj);
+      state.originalGeometries.set(obj.uuid, obj.geometry.clone());
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(m => {
+        if (m && !state.materials.includes(m)) {
+          state.materials.push(m);
+          // Snapshot original textures (keep image data forever)
+          for (const key of ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap','specularMap','alphaMap']) {
+            const t = m[key];
+            if (t && !state.textures.includes(t)) {
+              state.textures.push(t);
+              if (t.image) state.originalTextureImages.set(t.uuid, t.image);
+            }
+          }
+          // Snapshot base color / props for reset
+          if (!state.originalMaterials.has(m.uuid)) {
+            state.originalMaterials.set(m.uuid, {
+              type: m.type,
+              color: m.color ? m.color.clone() : null,
+              metalness: m.metalness ?? 0,
+              roughness: m.roughness ?? 1,
+              emissive: m.emissive ? m.emissive.clone() : null,
+              emissiveIntensity: m.emissiveIntensity ?? 0,
+              opacity: m.opacity ?? 1,
+              transparent: m.transparent ?? false,
+              flatShading: m.flatShading ?? false,
+              wireframe: m.wireframe ?? false,
+              side: m.side,
+              map: m.map || null,
+            });
+          }
+        }
+      });
+    }
+  });
+
+  // Animations
+  if (state.animations.length) {
+    state.mixer = new THREE.AnimationMixer(state.root);
+    state.animations.forEach(clip => state.mixer.clipAction(clip).play());
+  }
+
+  scene.add(state.root);
+  $('emptyState').style.display = 'none';
+
+  updateInfo();
+  updatePolyReadout();
+  frameCamera();
+  groundModel(false); // place ground plane just below model
+}
+
+/* =============================================================
+ * Info panel
+ * ============================================================= */
+function updateInfo() {
+  let verts = 0, tris = 0;
+  state.meshes.forEach(m => {
+    const g = m.geometry;
+    if (!g) return;
+    const pos = g.attributes.position;
+    if (pos) verts += pos.count;
+    if (g.index) tris += g.index.count / 3;
+    else if (pos) tris += pos.count / 3;
+  });
+  $('infoVerts').textContent = verts.toLocaleString();
+  $('infoTris').textContent = Math.round(tris).toLocaleString();
+  $('infoMeshes').textContent = state.meshes.length;
+  $('infoMats').textContent = state.materials.length;
+  $('infoTexCount').textContent = state.textures.length;
+
+  let maxRes = 0;
+  state.textures.forEach(t => {
+    if (t.image && t.image.width) maxRes = Math.max(maxRes, t.image.width, t.image.height);
+  });
+  $('infoTexRes').textContent = maxRes ? (maxRes + 'px') : '—';
+  $('infoSize').textContent = state.fileSize
+    ? (state.fileSize / 1024 / 1024).toFixed(2) + ' MB' : '—';
+
+  const box = new THREE.Box3().setFromObject(state.root);
+  const size = new THREE.Vector3(); box.getSize(size);
+  $('infoBounds').textContent = `${size.x.toFixed(2)}×${size.y.toFixed(2)}×${size.z.toFixed(2)}`;
+}
+
+/* =============================================================
+ * Camera framing
+ * ============================================================= */
+function frameCamera() {
+  if (!state.root) return;
+  const box = new THREE.Box3().setFromObject(state.root);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const dist = maxDim / (2 * Math.tan((camera.fov * Math.PI / 180) / 2)) * 1.6;
+  camera.position.copy(center).add(new THREE.Vector3(dist, dist * 0.6, dist));
+  camera.near = maxDim / 1000;
+  camera.far = maxDim * 100;
+  camera.updateProjectionMatrix();
+  controls.target.copy(center);
+  controls.update();
+}
+$('btnFrameCam').onclick = frameCamera;
+$('btnFrame2').onclick = frameCamera;
+$('btnResetCam').onclick = () => {
+  camera.position.set(3, 2, 4); controls.target.set(0,0,0); controls.update();
+};
+
+/* =============================================================
+ * Style presets (do NOT remove textures — only tweak render params)
+ * ============================================================= */
+document.querySelectorAll('.preset').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    applyPreset(btn.dataset.preset);
+  };
+});
+
+function applyPreset(name) {
+  if (!state.root) return;
+  state.materials.forEach(m => {
+    const orig = state.originalMaterials.get(m.uuid);
+    // Restore baseline material props before applying preset
+    if (orig) {
+      m.metalness = orig.metalness;
+      m.roughness = orig.roughness;
+      m.flatShading = orig.flatShading;
+      m.wireframe = false;
+      if (m.emissive && orig.emissive) m.emissive.copy(orig.emissive);
+      m.emissiveIntensity = orig.emissiveIntensity;
+    }
+    // Ensure texture retention
+    // (map is always preserved – presets never null it out)
+
+    switch (name) {
+      case 'original': break;
+      case 'lowpoly':
+        m.flatShading = true; m.roughness = 0.9; m.metalness = 0.0; break;
+      case 'psx':
+        // Blocky, dithery vibe: flat shading + reduced sampling below
+        m.flatShading = true; m.roughness = 1.0; m.metalness = 0.0;
+        setAllMapsFilter(THREE.NearestFilter); break;
+      case 'ps2':
+        m.flatShading = false; m.roughness = 0.85; m.metalness = 0.05;
+        setAllMapsFilter(THREE.LinearFilter); break;
+      case 'stylized':
+        m.roughness = 0.55; m.metalness = 0.1; m.flatShading = false; break;
+      case 'flat':
+        m.flatShading = true; break;
+      case 'toon':
+        // Simulate toon by hard-quantizing: high roughness + low env
+        m.roughness = 1.0; m.metalness = 0.0; m.flatShading = true; break;
+      case 'voxel':
+        m.flatShading = true; m.roughness = 1.0; m.metalness = 0.0;
+        setAllMapsFilter(THREE.NearestFilter); break;
+      case 'clay':
+        m.roughness = 1.0; m.metalness = 0.0; m.flatShading = false;
+        if (m.color) m.color.multiplyScalar(1.0); break;
+      case 'retro':
+        m.flatShading = true; m.roughness = 0.8; m.metalness = 0.0;
+        setAllMapsFilter(THREE.NearestFilter); break;
+    }
+    m.needsUpdate = true;
+  });
+  if (name === 'original') setAllMapsFilter(THREE.LinearMipmapLinearFilter);
+}
+
+function setAllMapsFilter(minFilter) {
+  state.textures.forEach(t => {
+    t.magFilter = (minFilter === THREE.NearestFilter) ? THREE.NearestFilter : THREE.LinearFilter;
+    t.minFilter = minFilter;
+    t.needsUpdate = true;
+  });
+}
+
+/* =============================================================
+ * Poly count reduction.
+ *
+ * Robust approach: SimplifyModifier requires non-indexed geometry, so
+ * we merge vertices first and then re-index. We protect against edge
+ * cases that were causing the model to "disappear":
+ *  - Don't simplify meshes that are too small (< 8 verts).
+ *  - Always keep at least 4 vertices per mesh.
+ *  - Validate the result has geometry & a position attribute before
+ *    swapping, otherwise keep the original.
+ *  - Clamp the minimum ratio so we never produce an empty mesh.
+ * ============================================================= */
+const simplifier = new SimplifyModifier();
+
+/* Slider + readout for the poly count */
+$('sPoly').addEventListener('input', (e) => {
+  const ratio = parseFloat(e.target.value);
+  $('vPoly').textContent = Math.round(ratio * 100) + '%';
+  updatePolyTargetReadout(ratio);
+});
+
+$('btnPolyApply').onclick = () => {
+  const ratio = parseFloat($('sPoly').value);
+  reducePoly(ratio);
+};
+$('btnPolyFull').onclick = () => {
+  $('sPoly').value = 1;
+  $('vPoly').textContent = '100%';
+  updatePolyTargetReadout(1);
+  reducePoly(1);
+};
+
+/* Show current vs target triangle count as the slider moves. */
+function updatePolyTargetReadout(ratio) {
+  let curTris = 0, origTris = 0;
+  state.meshes.forEach(m => {
+    const orig = state.originalGeometries.get(m.uuid);
+    if (orig) {
+      if (orig.index) origTris += orig.index.count / 3;
+      else if (orig.attributes.position) origTris += orig.attributes.position.count / 3;
+    }
+    const g = m.geometry;
+    if (g) {
+      if (g.index) curTris += g.index.count / 3;
+      else if (g.attributes.position) curTris += g.attributes.position.count / 3;
+    }
+  });
+  $('polyCurrentTris').textContent = Math.round(curTris).toLocaleString();
+  $('polyTargetTris').textContent = Math.round(origTris * ratio).toLocaleString();
+}
+function updatePolyReadout() {
+  $('polyCurrentTris').textContent = $('infoTris').textContent;
+  $('polyTargetTris').textContent = $('infoTris').textContent;
+}
+
+function reducePoly(ratio) {
+  if (!state.root) return;
+  showLoading(true);
+  // Defer to next frame so spinner shows
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      try {
+        let totalRemoved = 0, totalBefore = 0;
+        state.meshes.forEach(mesh => {
+          const original = state.originalGeometries.get(mesh.uuid);
+          if (!original) return;
+
+          // 100% (or very close) -> restore original geometry untouched
+          if (ratio >= 0.999) {
+            if (mesh.geometry !== original) {
+              mesh.geometry.dispose();
+              mesh.geometry = original.clone();
+            }
+            return;
+          }
+
+          // Get position count of the *original* geometry to compute target
+          const origPos = original.attributes.position;
+          if (!origPos) return;
+          const origVertCount = origPos.count;
+          totalBefore += origVertCount;
+
+          // Skip tiny meshes that would collapse when simplified
+          if (origVertCount < 8) return;
+
+          // Compute how many vertices we want to remove.
+          const targetCount = Math.max(4, Math.floor(origVertCount * ratio));
+          const removed = origVertCount - targetCount;
+          if (removed <= 0) return;
+
+          try {
+            // SimplifyModifier needs non-indexed geometry. Clone the
+            // original then merge duplicate vertices (keeps UVs by
+            // using mergeVertices which preserves all attributes).
+            let g = original.clone();
+            g = mergeVertices(g);
+            const posCount = g.attributes.position.count;
+
+            // Only remove up to what we safely can (don't go below 4 verts)
+            const safeRemoved = Math.min(removed, Math.max(0, posCount - 4));
+            if (safeRemoved <= 0) return;
+
+            const simplified = simplifier.modify(g, safeRemoved);
+            totalRemoved += safeRemoved;
+
+            // Validate the simplified geometry is still usable.
+            if (!simplified || !simplified.attributes.position ||
+                simplified.attributes.position.count < 3) {
+              console.warn('Simplify produced invalid geometry, keeping original.');
+              return;
+            }
+
+            // Re-merge vertices on the simplified result to rebuild a clean
+            // index (SimplifyModifier returns non-indexed geometry).
+            const finalGeo = mergeVertices(simplified);
+            finalGeo.computeVertexNormals();
+
+            mesh.geometry.dispose();
+            mesh.geometry = finalGeo;
+          } catch (err) {
+            console.warn('Simplification failed for a mesh, keeping original.', err);
+          }
+        });
+        state.currentPolyRatio = ratio;
+        updateInfo();
+        updatePolyReadout();
+        showLoading(false);
+        toast(`Poly set to ${Math.round(ratio * 100)}% (${totalRemoved} verts removed)`, 'success');
+      } catch (err) {
+        console.error(err);
+        showLoading(false);
+        toast('Poly reduction failed', 'error');
+      }
+    }, 20);
+  });
+}
+
+/* =============================================================
+ * Texture adjustments — process into canvas textures.
+ * Preserves original image data so we can always re-apply from scratch.
+ * ============================================================= */
+const texAdj = { brightness:1, contrast:1, saturation:1, hue:0, gamma:1, sharpness:0, res:0 };
+
+function bindSlider(id, valId, key, fmt) {
+  const s = $(id), v = $(valId);
+  s.addEventListener('input', () => {
+    texAdj[key] = parseFloat(s.value);
+    v.textContent = fmt ? fmt(s.value) : s.value;
+    scheduleTextureUpdate();
+  });
+}
+bindSlider('sBright','vBright','brightness', v => parseFloat(v).toFixed(2));
+bindSlider('sContrast','vContrast','contrast', v => parseFloat(v).toFixed(2));
+bindSlider('sSat','vSat','saturation', v => parseFloat(v).toFixed(2));
+bindSlider('sHue','vHue','hue', v => v + '°');
+bindSlider('sGamma','vGamma','gamma', v => parseFloat(v).toFixed(2));
+bindSlider('sSharp','vSharp','sharpness', v => parseFloat(v).toFixed(2));
+
+// Exposure is applied on the renderer for HDR-correctness.
+$('sExp').addEventListener('input', e => {
+  renderer.toneMappingExposure = parseFloat(e.target.value);
+  $('vExp').textContent = parseFloat(e.target.value).toFixed(2);
+});
+
+$('texRes').addEventListener('change', e => {
+  texAdj.res = parseInt(e.target.value, 10);
+  scheduleTextureUpdate();
+});
+
+let texUpdateTimer = null;
+function scheduleTextureUpdate() {
+  clearTimeout(texUpdateTimer);
+  texUpdateTimer = setTimeout(processAllTextures, 80);
+}
+
+function processAllTextures() {
+  state.textures.forEach(t => {
+    const src = state.originalTextureImages.get(t.uuid);
+    if (!src || !src.width) return;
+    const targetSize = texAdj.res || Math.max(src.width, src.height);
+    const scale = Math.min(1, targetSize / Math.max(src.width, src.height));
+    const w = Math.max(1, Math.round(src.width * scale));
+    const h = Math.max(1, Math.round(src.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(src, 0, 0, w, h);
+
+    // Only apply per-pixel filters if any adjustment is non-default
+    const needsPixel = (
+      texAdj.brightness !== 1 || texAdj.contrast !== 1 ||
+      texAdj.saturation !== 1 || texAdj.hue !== 0 || texAdj.gamma !== 1
+    );
+    if (needsPixel) {
+      const img = ctx.getImageData(0, 0, w, h);
+      applyPixelAdjustments(img.data);
+      ctx.putImageData(img, 0, 0);
+    }
+    if (texAdj.sharpness > 0) applySharpen(ctx, w, h, texAdj.sharpness);
+
+    t.image = canvas;
+    t.needsUpdate = true;
+  });
+}
+
+function applyPixelAdjustments(d) {
+  const b = texAdj.brightness, c = texAdj.contrast, s = texAdj.saturation;
+  const hue = texAdj.hue * Math.PI / 180;
+  const gamma = texAdj.gamma;
+  const cs = Math.cos(hue), sn = Math.sin(hue);
+  // Hue rotation matrix on RGB
+  const m = [
+    0.213 + cs*0.787 - sn*0.213, 0.715 - cs*0.715 - sn*0.715, 0.072 - cs*0.072 + sn*0.928,
+    0.213 - cs*0.213 + sn*0.143, 0.715 + cs*0.285 + sn*0.140, 0.072 - cs*0.072 - sn*0.283,
+    0.213 - cs*0.213 - sn*0.787, 0.715 - cs*0.715 + sn*0.715, 0.072 + cs*0.928 + sn*0.072,
+  ];
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i]/255, g = d[i+1]/255, bl = d[i+2]/255;
+    // Hue
+    const nr = r*m[0] + g*m[1] + bl*m[2];
+    const ng = r*m[3] + g*m[4] + bl*m[5];
+    const nb = r*m[6] + g*m[7] + bl*m[8];
+    r = nr; g = ng; bl = nb;
+    // Saturation
+    const gray = 0.2989 * r + 0.5870 * g + 0.1140 * bl;
+    r = gray + (r - gray) * s;
+    g = gray + (g - gray) * s;
+    bl = gray + (bl - gray) * s;
+    // Brightness
+    r *= b; g *= b; bl *= b;
+    // Contrast
+    r = (r - 0.5) * c + 0.5;
+    g = (g - 0.5) * c + 0.5;
+    bl = (bl - 0.5) * c + 0.5;
+    // Gamma
+    r = Math.pow(Math.max(0, r), 1 / gamma);
+    g = Math.pow(Math.max(0, g), 1 / gamma);
+    bl = Math.pow(Math.max(0, bl), 1 / gamma);
+    d[i] = Math.max(0, Math.min(255, r * 255));
+    d[i+1] = Math.max(0, Math.min(255, g * 255));
+    d[i+2] = Math.max(0, Math.min(255, bl * 255));
+  }
+}
+
+function applySharpen(ctx, w, h, amount) {
+  // Simple 3x3 sharpen convolution
+  const src = ctx.getImageData(0, 0, w, h);
+  const dst = ctx.createImageData(w, h);
+  const s = src.data, o = dst.data;
+  const k = amount * 4;
+  const center = 1 + k;
+  const side = -k / 4;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      for (let c = 0; c < 3; c++) {
+        const i = (y*w+x)*4 + c;
+        const v = s[i]*center
+                + s[i-4]*side + s[i+4]*side
+                + s[i-w*4]*side + s[i+w*4]*side;
+        o[i] = Math.max(0, Math.min(255, v));
+      }
+      o[(y*w+x)*4+3] = s[(y*w+x)*4+3];
+    }
+  }
+  ctx.putImageData(dst, 0, 0);
+}
+
+/* =============================================================
+ * Material controls (apply to all materials)
+ * ============================================================= */
+function bindMat(id, valId, apply, fmt) {
+  const s = $(id), v = $(valId);
+  s.addEventListener('input', () => {
+    v.textContent = fmt ? fmt(s.value) : s.value;
+    state.materials.forEach(m => { apply(m, parseFloat(s.value)); m.needsUpdate = true; });
+  });
+}
+bindMat('sMetal','vMetal', (m,x) => { if('metalness' in m) m.metalness = x; }, v=>parseFloat(v).toFixed(2));
+bindMat('sRough','vRough', (m,x) => { if('roughness' in m) m.roughness = x; }, v=>parseFloat(v).toFixed(2));
+bindMat('sEmi','vEmi', (m,x) => { if('emissiveIntensity' in m) m.emissiveIntensity = x; }, v=>parseFloat(v).toFixed(2));
+bindMat('sOpa','vOpa', (m,x) => { m.opacity = x; m.transparent = x < 1; }, v=>parseFloat(v).toFixed(2));
+
+/* Color tint — multiplies material base color by the picked tint */
+$('matColor').addEventListener('input', (e) => {
+  const c = new THREE.Color(e.target.value);
+  state.materials.forEach(m => {
+    if (!m.color) return;
+    const orig = state.originalMaterials.get(m.uuid);
+    if (orig && orig.color) {
+      m.color.copy(orig.color).multiply(c);
+    }
+    m.needsUpdate = true;
+  });
+});
+
+$('cDouble').addEventListener('change', e => {
+  state.materials.forEach(m => { m.side = e.target.checked ? THREE.DoubleSide : THREE.FrontSide; m.needsUpdate = true; });
+});
+$('cWire').addEventListener('change', e => {
+  state.materials.forEach(m => { m.wireframe = e.target.checked; m.needsUpdate = true; });
+});
+$('cFlat').addEventListener('change', e => {
+  state.materials.forEach(m => { m.flatShading = e.target.checked; m.needsUpdate = true; });
+});
+$('cOutline').addEventListener('change', e => setOutline(e.target.checked));
+
+function setOutline(on) {
+  // Clear existing outlines
+  state.outlineMeshes.forEach(o => { scene.remove(o); o.geometry.dispose(); o.material.dispose(); });
+  state.outlineMeshes = [];
+  if (!on || !state.root) return;
+  state.meshes.forEach(m => {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
+    const outline = new THREE.Mesh(m.geometry, mat);
+    m.updateWorldMatrix(true, false);
+    outline.matrixAutoUpdate = false;
+    outline.matrix.copy(m.matrixWorld).scale(new THREE.Vector3(1.03, 1.03, 1.03));
+    scene.add(outline);
+    state.outlineMeshes.push(outline);
+  });
+}
+
+/* =============================================================
+ * Transform controls
+ * ============================================================= */
+function bindTransform(id, valId, apply, fmt) {
+  const s = $(id), v = $(valId);
+  s.addEventListener('input', () => {
+    if (!state.root) return;
+    v.textContent = fmt ? fmt(s.value) : s.value;
+    apply(parseFloat(s.value));
+  });
+}
+bindTransform('sScale','vScale', v => state.root.scale.setScalar(v), v=>parseFloat(v).toFixed(2));
+bindTransform('sRx','vRx', v => state.root.rotation.x = v*Math.PI/180, v=>v+'°');
+bindTransform('sRy','vRy', v => state.root.rotation.y = v*Math.PI/180, v=>v+'°');
+bindTransform('sRz','vRz', v => state.root.rotation.z = v*Math.PI/180, v=>v+'°');
+
+$('btnCenter').onclick = () => {
+  if (!state.root) return;
+  const box = new THREE.Box3().setFromObject(state.root);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  state.root.position.sub(center);
+};
+$('btnGround').onclick = () => groundModel(true);
+function groundModel(showToast) {
+  if (!state.root) return;
+  const box = new THREE.Box3().setFromObject(state.root);
+  state.root.position.y -= box.min.y;
+  ground.position.y = 0;
+  if (showToast) toast('Model grounded', 'success');
+}
+$('btnResetTransform').onclick = () => {
+  if (!state.root) return;
+  state.root.position.set(0,0,0);
+  state.root.rotation.set(0,0,0);
+  state.root.scale.set(1,1,1);
+  $('sScale').value = 1; $('vScale').textContent = '1.00';
+  $('sRx').value = 0; $('sRy').value = 0; $('sRz').value = 0;
+  $('vRx').textContent = $('vRy').textContent = $('vRz').textContent = '0°';
+};
+
+/* =============================================================
+ * Repair tools
+ * ============================================================= */
+$('btnRecalcNormals').onclick = () => {
+  state.meshes.forEach(m => m.geometry.computeVertexNormals());
+  toast('Normals recalculated', 'success');
+};
+$('btnFlipNormals').onclick = () => {
+  state.meshes.forEach(m => {
+    const n = m.geometry.attributes.normal;
+    if (!n) return;
+    for (let i = 0; i < n.array.length; i++) n.array[i] = -n.array[i];
+    n.needsUpdate = true;
+  });
+  toast('Normals flipped', 'success');
+};
+$('btnMergeMats').onclick = () => {
+  // Merge materials that share the same key properties + map.
+  const keyOf = m => `${m.type}|${m.color?.getHexString?.()||''}|${m.map?.uuid||''}|${m.metalness}|${m.roughness}`;
+  const registry = new Map();
+  let merged = 0;
+  state.meshes.forEach(mesh => {
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mats.forEach((m, i) => {
+      if (!m) return;
+      const k = keyOf(m);
+      if (registry.has(k)) {
+        const first = registry.get(k);
+        if (first !== m) {
+          if (Array.isArray(mesh.material)) mesh.material[i] = first;
+          else mesh.material = first;
+          merged++;
+        }
+      } else registry.set(k, m);
+    });
+  });
+  // Rebuild unique material list
+  state.materials = Array.from(new Set([...registry.values()]));
+  updateInfo();
+  toast(`Merged ${merged} duplicate materials`, 'success');
+};
+$('btnRemoveEmpty').onclick = () => {
+  let removed = 0;
+  const toRemove = [];
+  state.root.traverse(o => {
+    if (o.isMesh && (!o.geometry || !o.geometry.attributes.position || o.geometry.attributes.position.count === 0)) {
+      toRemove.push(o);
+    }
+  });
+  toRemove.forEach(o => { o.parent && o.parent.remove(o); removed++; });
+  state.meshes = state.meshes.filter(m => !toRemove.includes(m));
+  updateInfo();
+  toast(`Removed ${removed} empty meshes`, 'success');
+};
+$('btnRemoveUnused').onclick = () => {
+  let removed = 0;
+  const toRemove = [];
+  state.root.traverse(o => {
+    if (o !== state.root && !o.isMesh && !o.isLight && !o.isCamera && o.children.length === 0) {
+      toRemove.push(o);
+    }
+  });
+  toRemove.forEach(o => { o.parent && o.parent.remove(o); removed++; });
+  toast(`Removed ${removed} unused nodes`, 'success');
+};
+
+/* =============================================================
+ * View modes
+ * ============================================================= */
+document.querySelectorAll('.view-mode').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.view-mode').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    setViewMode(btn.dataset.mode);
+  };
+});
+
+function setViewMode(mode) {
+  state.viewMode = mode;
+  state.meshes.forEach(mesh => {
+    if (!mesh.userData._origMat) mesh.userData._origMat = mesh.material;
+    switch (mode) {
+      case 'solid':
+        mesh.material = mesh.userData._origMat;
+        if (mesh.material.wireframe !== undefined) mesh.material.wireframe = $('cWire').checked;
+        break;
+      case 'wireframe':
+        mesh.material = new THREE.MeshBasicMaterial({ color: 0x9ab0ff, wireframe: true });
+        break;
+      case 'normals':
+        mesh.material = new THREE.MeshNormalMaterial({ flatShading: false });
+        break;
+      case 'uv': {
+        // Render UVs as a color pattern
+        mesh.material = makeUVMaterial();
+        break;
+      }
+      case 'material':
+        mesh.material = new THREE.MeshStandardMaterial({ color: 0xcfd8ff, metalness: 0.2, roughness: 0.6 });
+        break;
+    }
+  });
+}
+function makeUVMaterial() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0,0,256,256);
+  g.addColorStop(0,'#ff6b6b'); g.addColorStop(0.5,'#4ecdc4'); g.addColorStop(1,'#ffd166');
+  ctx.fillStyle = g; ctx.fillRect(0,0,256,256);
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 16; i++) {
+    ctx.beginPath(); ctx.moveTo(i*16,0); ctx.lineTo(i*16,256); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,i*16); ctx.lineTo(256,i*16); ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  return new THREE.MeshBasicMaterial({ map: tex });
+}
+
+/* =============================================================
+ * Lighting controls
+ * ============================================================= */
+$('sAmb').addEventListener('input', e => {
+  ambient.intensity = parseFloat(e.target.value);
+  $('vAmb').textContent = ambient.intensity.toFixed(2);
+});
+$('sDir').addEventListener('input', e => {
+  dirLight.intensity = parseFloat(e.target.value);
+  $('vDir').textContent = dirLight.intensity.toFixed(2);
+});
+$('sEnv').addEventListener('input', e => {
+  scene.environmentIntensity = parseFloat(e.target.value);
+  $('vEnv').textContent = scene.environmentIntensity.toFixed(2);
+});
+$('cShadow').addEventListener('change', e => {
+  renderer.shadowMap.enabled = e.target.checked;
+  state.meshes.forEach(m => { m.castShadow = e.target.checked; m.receiveShadow = e.target.checked; });
+  ground.visible = e.target.checked;
+});
+$('bgColor').addEventListener('input', e => {
+  scene.background = new THREE.Color(e.target.value);
+});
+
+/* Grid toggle */
+$('cGrid').addEventListener('change', e => {
+  gridHelper.visible = e.target.checked;
+  if (e.target.checked && state.root) {
+    // Size grid to model bounds
+    const box = new THREE.Box3().setFromObject(state.root);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const maxDim = Math.max(size.x, size.z) || 20;
+    gridHelper.scale.setScalar(maxDim / 20);
+    gridHelper.position.y = 0;
+  }
+});
+
+/* =============================================================
+ * Export as GLB
+ * ============================================================= */
+$('btnExport').onclick = () => {
+  if (!state.root) { toast('Load a model first', 'error'); return; }
+  showLoading(true);
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    state.root,
+    (result) => {
+      const blob = new Blob([result], { type: 'model/gltf-binary' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const base = state.fileName.replace(/\.glb$/i, '') || 'model';
+      a.href = url; a.download = base + '-edited.glb';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showLoading(false);
+      const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
+      toast(`Exported GLB (${sizeMB} MB)`, 'success');
+    },
+    (err) => { console.error(err); showLoading(false); toast('Export failed', 'error'); },
+    { binary: true, embedImages: true, animations: state.animations }
+  );
+};
+
+/* =============================================================
+ * Reset all: reload the original GLB bytes
+ * ============================================================= */
+$('btnResetAll').onclick = () => {
+  if (!state.originalArrayBuffer) { toast('Nothing to reset', 'error'); return; }
+  // Reset UI
+  ['sBright','sContrast','sSat','sGamma','sExp'].forEach(id => { $(id).value = 1; });
+  $('sHue').value = 0; $('sSharp').value = 0;
+  texAdj.brightness = texAdj.contrast = texAdj.saturation = texAdj.gamma = 1;
+  texAdj.hue = 0; texAdj.sharpness = 0; texAdj.res = 0;
+  $('texRes').value = 0;
+  ['vBright','vContrast','vSat','vGamma','vExp'].forEach(id => $(id).textContent = '1.00');
+  $('vHue').textContent = '0°'; $('vSharp').textContent = '0.00';
+  renderer.toneMappingExposure = 1;
+  $('sScale').value = 1; $('vScale').textContent = '1.00';
+  ['sRx','sRy','sRz'].forEach(id => $(id).value = 0);
+  ['vRx','vRy','vRz'].forEach(id => $(id).textContent = '0°');
+  $('sPoly').value = 1; $('vPoly').textContent = '100%';
+  $('matColor').value = '#ffffff';
+  $('cWire').checked = false; $('cFlat').checked = false; $('cDouble').checked = false; $('cOutline').checked = false;
+  document.querySelectorAll('.preset').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.view-mode').forEach(b => b.classList.remove('active'));
+  document.querySelector('.view-mode[data-mode="solid"]').classList.add('active');
+  parseAndLoadGLB(state.originalArrayBuffer);
+};
+
+/* =============================================================
+ * Keyboard shortcuts
+ * ============================================================= */
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  switch (e.key.toLowerCase()) {
+    case 'r': frameCamera(); break;
+    case 'w': setViewMode('wireframe'); $('viewModeLabel') && ($('viewModeLabel').textContent=''); break;
+    case 's':
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); $('btnExport').click(); }
+      break;
+    case 'escape': $('btnResetCam').click(); break;
+  }
+});
+
+/* =============================================================
+ * Global error handling
+ * ============================================================= */
+window.addEventListener('error', (e) => {
+  if (e.message && e.message.toLowerCase().includes('texture')) {
+    toast('Missing or invalid texture detected', 'error');
+  }
+});
+
+</script>
+</body>
+</html>
