@@ -78,7 +78,7 @@
 
   /* =========================================================
      Controls
-     ========================================================= */
+   ␡ ========================================================= */
   .btn {
     appearance: none; border: 1px solid rgba(255,255,255,0.08);
     background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
@@ -1400,6 +1400,19 @@ $('cGrid').addEventListener('change', e => {
 
 /* =============================================================
  * Export as GLB
+ * — Automatic download to the device's Downloads folder.
+ *
+ * On Android/Termux webviews, the standard <a download> click
+ * approach sometimes fails to trigger a real file save. So we use
+ * a robust multi-strategy downloader:
+ *   1) Try the regular blob anchor click (works on desktop & many
+ *      Android webviews).
+ *   2) As a fallback, use a data-URI based anchor click.
+ *   3) If a native Android bridge (AndroidBridge / JsInterface) is
+ *      present (common when packaging HTML in an APK via Termux),
+ *      call it with the base64 of the file so the Java side writes
+ *      it directly to the Downloads folder — guaranteeing the file
+ *      lands there with no user interaction.
  * ============================================================= */
 $('btnExport').onclick = () => {
   if (!state.root) { toast('Load a model first', 'error'); return; }
@@ -1408,16 +1421,72 @@ $('btnExport').onclick = () => {
   exporter.parse(
     state.root,
     (result) => {
+      const base = (state.fileName.replace(/\.glb$/i, '') || 'model') + '-edited';
+      const fname = base + '.glb';
+
+      // Build the GLB ArrayBuffer -> Blob
       const blob = new Blob([result], { type: 'model/gltf-binary' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const base = state.fileName.replace(/\.glb$/i, '') || 'model';
-      a.href = url; a.download = base + '-edited.glb';
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      showLoading(false);
       const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
-      toast(`Exported GLB (${sizeMB} MB)`, 'success');
+
+      // Strategy 1 & 2: anchor-based download (blob URL + data URI fallback)
+      const doAnchorDownload = (useDataUri) => {
+        try {
+          const a = document.createElement('a');
+          if (useDataUri) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              a.href = reader.result;
+              a.download = fname;
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              showLoading(false);
+              toast(`Exported GLB (${sizeMB} MB) → Downloads`, 'success');
+            };
+            reader.readAsDataURL(blob);
+          } else {
+            const url = URL.createObjectURL(blob);
+            a.href = url;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+          }
+        } catch (e) {
+          console.error('Anchor download failed', e);
+          return false;
+        }
+        return true;
+      };
+
+      // Strategy 3: native Android bridge (JsInterface injected from the APK)
+      const tryNativeBridge = () => {
+        try {
+          const bridge = window.AndroidBridge || window.Android || window.jsInterface;
+          if (bridge && typeof bridge.saveFileToDownloads === 'function') {
+            // Convert blob -> base64 (the bridge expects a base64 string)
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              // reader.result is "data:model/gltf-binary;base64,AAAA..."
+              const b64 = reader.result.split(',')[1];
+              bridge.saveFileToDownloads(fname, b64, 'model/gltf-binary');
+              showLoading(false);
+              toast(`Exported GLB (${sizeMB} MB) → Downloads`, 'success');
+            };
+            reader.readAsDataURL(blob);
+            return true;
+          }
+        } catch (e) {
+          console.error('Native bridge failed', e);
+        }
+        return false;
+      };
+
+      // Try native bridge first (most reliable inside an APK), then anchor.
+      if (tryNativeBridge()) return;
+      if (doAnchorDownload(false)) return;
+      doAnchorDownload(true);
     },
     (err) => { console.error(err); showLoading(false); toast('Export failed', 'error'); },
     { binary: true, embedImages: true, animations: state.animations }
